@@ -133,6 +133,11 @@
 
   footer{color:var(--muted);font-size:12px;text-align:center;margin-top:40px}
   .hidden{display:none !important}
+
+  /* ===== Toast ===== */
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);background:#1e2234;color:var(--ink);border:1px solid var(--line);border-radius:12px;padding:12px 18px;font-size:14px;z-index:200;opacity:0;transition:opacity .25s,transform .25s;pointer-events:none;max-width:90vw;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.4)}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  .toast.warn{border-color:rgba(251,191,36,.4);color:#fde68a}
 </style>
 </head>
 <body data-theme="dark">
@@ -154,6 +159,7 @@
     <div class="hint">Uses OpenStreetMap reverse geocoding. No account needed.</div>
   </div>
 </div>
+<div id="toast" class="toast"></div>
 
 <!-- ========== HEADER ========== -->
 <header class="top">
@@ -359,8 +365,25 @@ const globalMode = $("globalMode");
 function showSplash(){ splash.classList.remove("hidden"); splash.style.display="flex"; }
 function hideSplash(){ splash.style.display="none"; }
 
+/* ---- Toast notification (replaces all alert() calls) ---- */
+let _toastTimer;
+function showToast(msg, duration=4000, warn=false){
+  const t = $("toast");
+  t.innerHTML = msg;
+  t.className = "toast" + (warn ? " warn" : "");
+  clearTimeout(_toastTimer);
+  // Force reflow so re-triggers animation even if already showing
+  void t.offsetWidth;
+  t.classList.add("show");
+  _toastTimer = setTimeout(() => t.classList.remove("show"), duration);
+}
+
 function detectLocation(){
-  if (!navigator.geolocation){ alert("Geolocation not supported in this browser."); return; }
+  if (!navigator.geolocation){
+    showToast("📍 Location not supported in this browser — type your city below.", 5000, true);
+    $("cityInput").focus();
+    return;
+  }
   const btn = $("detectBtn"); btn.textContent = "📍 Detecting…"; btn.disabled = true;
   navigator.geolocation.getCurrentPosition(async pos => {
     const {latitude:lat, longitude:lon} = pos.coords;
@@ -377,21 +400,32 @@ function detectLocation(){
     } finally { btn.textContent="📍 Detect my location"; btn.disabled=false; }
   }, err => {
     btn.textContent="📍 Detect my location"; btn.disabled=false;
-    alert("Couldn't get GPS. Try typing your city instead.\n\n"+err.message);
+    // Permission denied (code 1) is by far the most common — give a friendly nudge
+    if (err.code === 1){
+      showToast("📍 Location blocked — just type your city in the box below.", 6000, true);
+    } else if (err.code === 3){
+      showToast("📍 Location timed out. Type your city instead.", 5000, true);
+    } else {
+      showToast("📍 Couldn't get your location. Type your city below.", 5000, true);
+    }
+    $("cityInput").focus();
   }, {enableHighAccuracy:false, timeout:10000, maximumAge:60000});
 }
 
 async function lookupCity(q){
+  const btn = $("cityGo"); btn.textContent = "…"; btn.disabled = true;
   try {
     const r = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(q)}&limit=1`);
     const j = await r.json();
-    if (!j.length){ alert("Couldn't find that city."); return; }
+    if (!j.length){ showToast(`🔍 Couldn't find "${q}" — try a different spelling.`, 5000, true); return; }
     const h = j[0];
     const parts = (h.display_name||"").split(",").map(s=>s.trim());
     const city = parts[0] || q;
     const country = parts[parts.length-1] || "";
     applyLocation({city, country, countryCode:"", lat:+h.lat, lon:+h.lon});
-  } catch(e){ alert("Lookup failed: "+e.message); }
+  } catch(e){
+    showToast("🔍 City lookup failed — check your connection and try again.", 5000, true);
+  } finally { btn.textContent = "Go"; btn.disabled = false; }
 }
 
 function distanceKm(a,b){
