@@ -353,7 +353,7 @@ const globalMode = $("globalMode");
   $("locPill").onclick   = showSplash;
   $("themeBtn").onclick  = toggleTheme;
   $("refreshBtn").onclick = () => {
-    if (state.mode==="pgh") scrapeAll(VENUES.filter(v=>v.source==="scraped"));
+    if (state.mode==="pgh") initPgh();
     else if (state.mode==="city") scrapeAll(state.discoveredVenues);
   };
 
@@ -457,11 +457,23 @@ function applyLocation(loc){
 function flag(cc){ if(!cc || cc.length!==2) return ""; return String.fromCodePoint(...[...cc.toUpperCase()].map(c=>0x1F1E6+c.charCodeAt(0)-65)); }
 
 /* ---------------- Pittsburgh mode ---------------- */
-function initPgh(){
+async function initPgh(){
   $("venuesDirHeading").innerHTML = `Pittsburgh venue directory <span class="rule"></span>`;
   renderStatusBar(VENUES.filter(v=>v.source==="scraped"));
   renderVenues(VENUES);
-  scrapeAll(VENUES.filter(v=>v.source==="scraped"));
+  await scrapeAll(VENUES.filter(v=>v.source==="scraped"));
+
+  // If venue scrapers got nothing (CORS proxies blocked), fall back to Bandsintown API
+  if (state.events.length === 0){
+    try {
+      const bitEvents = await fetchBandsintownEvents({city:"Pittsburgh", countryCode:"US"});
+      if (bitEvents.length){
+        state.events = bitEvents;
+        $("statusBar").innerHTML = `<span class="spill"><span class="s ok"></span>Bandsintown · ${bitEvents.length} upcoming shows</span>`;
+        render();
+      }
+    } catch(e){ console.warn("PGH BIT fallback failed:", e); }
+  }
 }
 
 /* ----------------------------------------------------------------
@@ -1061,7 +1073,7 @@ function toggleTheme(){
 
 /* auto-refresh every 30 min in PGH or city mode */
 setInterval(() => {
-  if (state.mode==="pgh") scrapeAll(VENUES.filter(v=>v.source==="scraped"));
+  if (state.mode==="pgh") initPgh();
   else if (state.mode==="city" && state.discoveredVenues.length) scrapeAll(state.discoveredVenues);
 }, 30*60*1000);
 </script>
