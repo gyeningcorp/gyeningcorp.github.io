@@ -945,6 +945,7 @@ function eventCard(e){
   const el = document.createElement("div"); el.className = "card";
   const now = new Date();
   const live = sameDay(e.date, now) && (now - e.date) < 3*60*60*1000 && (now - e.date) > -30*60*1000;
+  const dirQ = encodeURIComponent(e.venueName + (e.area ? ', ' + e.area : ''));
   const dateStr = e.date.toLocaleDateString(undefined,{weekday:"short", month:"short", day:"numeric"});
   el.innerHTML = `
     <div class="row">
@@ -957,6 +958,8 @@ function eventCard(e){
     <div class="links">
       <a href="${e.url}" target="_blank" rel="noopener">Venue site ↗</a>
       <a href="https://www.google.com/search?q=${encodeURIComponent(e.title+' '+e.venueName+' tickets')}" target="_blank" rel="noopener">Search tickets</a>
+      <a href="https://www.google.com/maps/search/?api=1&query=${dirQ}" target="_blank" rel="noopener">📍 Google Maps</a>
+      <a href="https://waze.com/ul?q=${dirQ}&navigate=yes" target="_blank" rel="noopener">🚗 Waze</a>
     </div>`;
   return el;
 }
