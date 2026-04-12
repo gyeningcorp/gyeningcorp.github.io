@@ -1,7 +1,7 @@
 {
-  "name": "Local Bands Tonight",
-  "short_name": "Local Bands",
-  "description": "Find small local bands playing at bars and restaurants, tonight.",
+  "name": "Rolling In",
+  "short_name": "Rolling In",
+  "description": "See which bands are rolling in to bars and restaurants tonight.",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#0b0d12",
