@@ -240,11 +240,15 @@
 
 const PGH_RADIUS_KM = 40;          // Pittsburgh bounding radius
 const PGH_CENTER    = {lat:40.4406, lon:-79.9959};
+// Ordered: codetabs confirmed working 2026-04-12 for all 7 venues. Others kept as fallbacks.
 const CORS_PROXIES  = [
+  u => `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(u)}`,
   u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
   u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
+  u => `https://api.cors.lol/?url=${encodeURIComponent(u)}`,
   u => `https://thingproxy.freeboard.io/fetch/${u}`,
 ];
+const CACHE_TTL_MS = 20 * 60 * 1000;    // 20 min localStorage cache per venue
 
 /* -------- Venues (Tier 1 scraped, Tier 2 social, Tier 3 linked) -------- */
 const VENUES = [
@@ -260,12 +264,15 @@ const VENUES = [
     source:"scraped", site:"https://crafthousepgh.com" },
   { id:"roboto", name:"Mr. Roboto Project", area:"Bloomfield",
     source:"scraped", site:"https://www.therobotoproject.com/calendar.html" },
-  { id:"mrsmalls", name:"Mr. Smalls Theatre", area:"Millvale",
-    source:"scraped", site:"https://mrsmalls.com" },
-  { id:"bottlerocket", name:"Bottlerocket Social Hall", area:"North Side",
-    source:"scraped", site:"https://www.bottlerocketpgh.com" },
   { id:"stageae", name:"Stage AE", area:"North Shore",
     source:"scraped", site:"https://promowestlive.com/pittsburgh/stage-ae" },
+
+  // LINKED ONLY (events loaded by JS / external iframe; we link out rather than pretend to scrape)
+  { id:"mrsmalls", name:"Mr. Smalls Theatre", area:"Millvale",
+    source:"linked", site:"https://mrsmalls.com" },
+  { id:"bottlerocket", name:"Bottlerocket Social Hall", area:"North Side",
+    source:"linked", site:"https://www.bottlerocketpgh.com",
+    bandsintown:"https://www.bandsintown.com/v/bottlerocket-social-hall" },
 
   // SOCIAL WATCH (Tier 2)
   { id:"ellys", name:"Elly's", area:"Carnegie",
@@ -436,9 +443,10 @@ function renderStatusBar(){
 
 async function scrapeAll(){
   state.events = [];
-  VENUES.filter(v=>v.source==="scraped").forEach(v => state.scrapeStatus[v.id] = {status:"loading", count:0});
+  const scraped = VENUES.filter(v=>v.source==="scraped");
+  scraped.forEach(v => state.scrapeStatus[v.id] = {status:"loading", count:0});
   renderStatusBar();
-  const tasks = VENUES.filter(v=>v.source==="scraped").map(scrapeVenue);
+  const tasks = scraped.map(scrapeVenue);
   await Promise.allSettled(tasks);
   renderStatusBar();
   render();
@@ -449,8 +457,13 @@ async function fetchHtml(url){
   for (const p of CORS_PROXIES){
     try {
       const r = await fetch(p(url), {cache:"no-store"});
-      if (r.ok) return await r.text();
-      last = new Error("HTTP "+r.status);
+      if (r.ok){
+        const text = await r.text();
+        if (text && text.length > 500) return text;   // guard against empty-wrapper responses
+        last = new Error("empty response");
+      } else {
+        last = new Error("HTTP "+r.status);
+      }
     } catch(e){ last = e; }
   }
   throw last || new Error("all proxies failed");
@@ -458,45 +471,246 @@ async function fetchHtml(url){
 
 async function scrapeVenue(v){
   try {
+    // Serve from cache if fresh
+    const cached = readCache(v.id);
+    if (cached){
+      state.events.push(...cached);
+      state.scrapeStatus[v.id] = {status:"ok", count:cached.length, cached:true};
+      renderStatusBar(); render(); return;
+    }
     const html = await fetchHtml(v.site);
-    const events = parseEvents(html, v);
+    const parser = PARSERS[v.id] || parseGeneric;
+    const events = parser(html, v).map(serializeEvent);
+    writeCache(v.id, events);
+    state.events.push(...events.map(hydrateEvent));
     state.scrapeStatus[v.id] = {status: events.length ? "ok" : "bad", count: events.length};
-    state.events.push(...events);
   } catch(e){
-    state.scrapeStatus[v.id] = {status:"bad", count:0};
+    state.scrapeStatus[v.id] = {status:"bad", count:0, error:String(e).slice(0,120)};
   } finally { renderStatusBar(); render(); }
 }
 
-/* Generic best-effort event extractor.
-   Looks for date-like patterns near artist-name-like text. Returns [{title, venue, date, time, url}]. */
-function parseEvents(html, venue){
-  const doc = new DOMParser().parseFromString(html, "text/html");
-  const text = doc.body ? doc.body.innerText : "";
-  const out = [];
-  const seen = new Set();
-  const monthRe = "(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t|tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)";
-  const lineRe = new RegExp(`^(.{3,120}?)\\s*[·•\\-|–]\\s*${monthRe}\\s+\\d{1,2}(?:,\\s*\\d{4})?`, "i");
-  const dateRe  = new RegExp(`${monthRe}\\s+(\\d{1,2})(?:,\\s*(\\d{4}))?`, "i");
+function serializeEvent(e){ return {...e, date: e.date instanceof Date ? e.date.toISOString() : e.date}; }
+function hydrateEvent(e){ return {...e, date: new Date(e.date)}; }
 
+function cacheKey(id){ return `lbt.cache.${id}`; }
+function readCache(id){
+  try {
+    const raw = localStorage.getItem(cacheKey(id));
+    if (!raw) return null;
+    const {t, events} = JSON.parse(raw);
+    if (Date.now() - t > CACHE_TTL_MS) return null;
+    return events.map(hydrateEvent);
+  } catch { return null; }
+}
+function writeCache(id, events){
+  try { localStorage.setItem(cacheKey(id), JSON.stringify({t: Date.now(), events})); } catch {}
+}
+
+/* ====================== Per-venue parsers ======================
+   Each parser receives raw HTML and the venue object, returns
+   [{venueId, venueName, area, title, date(Date), url}].
+   When a parser returns [], scrapeVenue marks the venue "bad". */
+const PARSERS = {};
+
+/** Parse a month-name string to 0-11. */
+function parseMonth(s){
+  return ["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"]
+    .indexOf(s.toLowerCase().slice(0,3));
+}
+/** Best-guess year: stay in current year unless the date would be >30 days in the past.
+   Past dates stay in the current year (they just get filtered from "upcoming" tabs naturally). */
+function inferYear(monthIdx, day){
+  const now = new Date();
+  const y = now.getFullYear();
+  const tryD = new Date(y, monthIdx, day);
+  // Only roll to next year if the date is deep in the past — otherwise trust that
+  // a lightly-stale listing is intentional "current season" context.
+  if (tryD < new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30)) return y + 1;
+  return y;
+}
+function pushEvent(out, seen, venue, title, date, url){
+  if (!title || !(date instanceof Date) || isNaN(date)) return;
+  title = title.replace(/\s+/g," ").trim();
+  if (title.length < 2 || title.length > 180) return;
+  const key = `${venue.id}|${title.toLowerCase()}|${date.toISOString().slice(0,10)}`;
+  if (seen.has(key)) return;
+  seen.add(key);
+  out.push({ venueId:venue.id, venueName:venue.name, area:venue.area, title, date, url: url || venue.site });
+}
+
+/* ---- Thunderbird Music Hall (WordPress + RHP event plugin) ---- */
+PARSERS.thunderbird = function(html, venue){
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const out = [], seen = new Set();
+  doc.querySelectorAll('.rhp-event__single-event--list, .rhpSingleEvent').forEach(node => {
+    // Prefer the title from the <a class="url"> element (the artist anchor), not from ticket/RSVP buttons
+    const titleNode =
+      node.querySelector('.rhp-event__title--list a, .rhp-event__title--list, a.url[title]')
+      || node.querySelector('a.url[href]');
+    if (!titleNode) return;
+    let title = (titleNode.getAttribute?.('title') || titleNode.textContent || "").trim();
+    title = title.replace(/&#8211;/g, '–').replace(/&amp;/g, '&').replace(/&#\d+;/g, '');
+    if (!title || /^(buy tickets?|more info|tickets?|rsvp|details?)$/i.test(title)) return;
+    const linkNode = node.querySelector('a.url[href]') || titleNode;
+    const url = (linkNode && linkNode.getAttribute && linkNode.getAttribute('href')) || venue.site;
+    const dateNode = node.querySelector('.rhp-event__date--list, #eventDate, .eventMonth');
+    const dateText = dateNode ? dateNode.textContent.trim() : "";
+    const m = dateText.match(/(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{1,2})(?:,\s*(\d{4}))?/i);
+    if (!m) return;
+    const mo = parseMonth(m[1]); if (mo<0) return;
+    const day = +m[2];
+    const year = m[3] ? +m[3] : inferYear(mo, day);
+    pushEvent(out, seen, venue, title, new Date(year, mo, day), url);
+  });
+  return out;
+};
+
+/* ---- Club Café (Squarespace events block; <h2>title</h2> then "Sat April 11th …" text) ---- */
+PARSERS.clubcafe = function(html, venue){
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const out = [], seen = new Set();
+  const monthRe = /(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t|tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{1,2})/i;
+  doc.querySelectorAll('h2, h3').forEach(h => {
+    const title = h.textContent.trim();
+    if (!title || title.length < 2 || /UPCOMING|SHOWS|SOLD OUT$/i.test(title) && title.length < 15) return;
+    // Look at next ~500 chars of text
+    let scan = "";
+    let sib = h.nextSibling;
+    let steps = 0;
+    while (sib && scan.length < 500 && steps++ < 30){
+      scan += " " + (sib.textContent || "");
+      sib = sib.nextSibling;
+    }
+    // Also try the parent's text after the h2
+    if (scan.length < 40 && h.parentElement){
+      scan = h.parentElement.textContent.slice(h.parentElement.textContent.indexOf(title) + title.length,
+                                                 h.parentElement.textContent.indexOf(title) + title.length + 500);
+    }
+    const m = scan.match(monthRe);
+    if (!m) return;
+    const mo = parseMonth(m[1]); if (mo<0) return;
+    const day = +m[2];
+    pushEvent(out, seen, venue, title, new Date(inferYear(mo, day), mo, day));
+  });
+  return out;
+};
+
+/* ---- Crafthouse Stage & Grill (WordPress BlogPosting with meta "Title · Month Day, Year") ---- */
+PARSERS.crafthouse = function(html, venue){
+  const out = [], seen = new Set();
+  const re = /<meta[^>]*itemprop="mainEntityOfPage"[^>]*itemid="([^"]+)"[^>]*content="([^"]+)"/gi;
+  const monthRe = /(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t|tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{1,2}),\s*(\d{4})/i;
+  let m;
+  while ((m = re.exec(html))){
+    const url = m[1];
+    const content = m[2].replace(/&amp;/g,'&').replace(/&#8226;|&#8901;|∙|·|•/g,'·');
+    const parts = content.split(/\s*[·•]\s*/);
+    const title = parts[0] ? parts[0].trim() : "";
+    const datePart = parts[1] || content;
+    const dm = datePart.match(monthRe);
+    if (!title || !dm) continue;
+    const mo = parseMonth(dm[1]); if (mo<0) continue;
+    pushEvent(out, seen, venue, title, new Date(+dm[3], mo, +dm[2]), url);
+  }
+  return out;
+};
+
+/* ---- Mr. Roboto Project (Weebly; continuous-text "Upcoming Shows" list)
+   Format: "Friday, April 10th at 7pm (doors 6:30pm) - Artist1, Artist2. $15 at the door" */
+PARSERS.roboto = function(html, venue){
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const out = [], seen = new Set();
+  // Strip script/style, keep body text
+  doc.querySelectorAll('script, style, noscript').forEach(n => n.remove());
+  let text = (doc.body ? doc.body.textContent : "") || "";
+  text = text.replace(/\u00a0|&nbsp;/g, ' ').replace(/\s+/g, ' ');
+  const idx = text.search(/upcoming shows/i);
+  if (idx < 0) return [];
+  const region = text.slice(idx, idx + 8000);
+  // Match: "Friday, April 10th at 7pm ... - Artist, Artist . $15"
+  const re = /(Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*,?\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{1,2})(?:st|nd|rd|th)?[^-]{0,80}[-–—]\s*([^.$]{3,260}?)(?=\s*\.\s*\$|\s+Tickets|\s+(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*,?\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)|$)/gi;
+  let m;
+  while ((m = re.exec(region))){
+    const mo = parseMonth(m[2]); if (mo<0) continue;
+    const day = +m[3];
+    let title = m[4].trim().replace(/\s*[-–—]\s*$/, '').replace(/^\s*-\s*/, '');
+    // strip trailing fluff like "(tickets)" or "at the door"
+    title = title.replace(/\s*\(\s*tickets?\s*\).*$/i, '').replace(/\s*\/\s*\$[\d.]+.*$/,'').trim();
+    if (!title) continue;
+    pushEvent(out, seen, venue, title, new Date(inferYear(mo, day), mo, day));
+  }
+  return out;
+};
+
+/* ---- Stage AE (promowestlive; date appears as "Thursday, July 23" BEFORE the h2 title) ---- */
+PARSERS.stageae = function(html, venue){
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const out = [], seen = new Set();
+  const monthRe = /(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t|tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s*(?:&nbsp;|\s)\s*(\d{1,2})/i;
+  doc.querySelectorAll('h2').forEach(h => {
+    const title = h.textContent.replace(/&amp;/g,'&').trim();
+    if (!title || /^(today|upcoming|shows?|events?)$/i.test(title)) return;
+    // Walk up to find date text before the h2
+    let ctx = "";
+    let node = h;
+    for (let i = 0; i < 6 && ctx.length < 600; i++){
+      node = node.parentElement || node.previousElementSibling;
+      if (!node) break;
+      ctx = (node.textContent || "") + " " + ctx;
+    }
+    // Special case: "Today's Show"
+    let date = null;
+    if (/today'?s\s+show/i.test(ctx)){
+      date = new Date(); date.setHours(0,0,0,0);
+    } else {
+      const m = ctx.match(monthRe);
+      if (!m) return;
+      const mo = parseMonth(m[1]); if (mo<0) return;
+      const day = +m[2];
+      date = new Date(inferYear(mo, day), mo, day);
+    }
+    pushEvent(out, seen, venue, title, date);
+  });
+  return out;
+};
+
+/* ---- Generic fallback: JSON-LD Events, then date-line regex ---- */
+function parseGeneric(html, venue){
+  const out = [], seen = new Set();
+  // Try JSON-LD Event
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  doc.querySelectorAll('script[type="application/ld+json"]').forEach(s => {
+    try {
+      const data = JSON.parse(s.textContent);
+      const items = Array.isArray(data) ? data
+        : data['@graph'] ? data['@graph']
+        : data.itemListElement ? data.itemListElement
+        : [data];
+      items.forEach(it => {
+        if (!it) return;
+        const types = [].concat(it['@type'] || []);
+        if (!types.includes('Event') && !types.includes('MusicEvent') && !types.includes('TheaterEvent')) return;
+        const title = it.name || "";
+        const url = it.url || venue.site;
+        const d = it.startDate ? new Date(it.startDate) : null;
+        if (!d || isNaN(d)) return;
+        pushEvent(out, seen, venue, title, d, url);
+      });
+    } catch {}
+  });
+  if (out.length) return out;
+
+  // Fallback: scan innerText for "Title · Month Day"
+  const text = doc.body ? doc.body.innerText : "";
+  const monthRe = "(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t|tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)";
+  const lineRe = new RegExp(`^(.{3,120}?)\\s*[·•\\-|–]\\s*${monthRe}\\s+(\\d{1,2})(?:,\\s*(\\d{4}))?`, "i");
   text.split("\n").map(s=>s.trim()).filter(Boolean).forEach(line => {
-    if (line.length > 160) return;
+    if (line.length > 200) return;
     const m = line.match(lineRe);
     if (!m) return;
-    const dm = line.match(dateRe);
-    if (!dm) return;
-    const monthIdx = ["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"]
-      .indexOf(dm[1].toLowerCase().slice(0,3));
-    if (monthIdx<0) return;
-    const day = +dm[2];
-    const year = dm[3] ? +dm[3] : new Date().getFullYear();
-    const d = new Date(year, monthIdx, day);
-    if (isNaN(d)) return;
-    const title = m[1].trim().replace(/\s{2,}/g," ").replace(/^[-–—•·]+\s*/, "");
-    if (!title || /^(events?|upcoming|tickets?|menu|home)$/i.test(title)) return;
-    const key = `${venue.id}|${title}|${d.toISOString().slice(0,10)}`;
-    if (seen.has(key)) return;
-    seen.add(key);
-    out.push({ venueId:venue.id, venueName:venue.name, area:venue.area, title, date:d, url:venue.site });
+    const mo = parseMonth(m[2]); if (mo<0) return;
+    const day = +m[3]; const year = m[4] ? +m[4] : inferYear(mo, day);
+    pushEvent(out, seen, venue, m[1], new Date(year, mo, day));
   });
   return out.slice(0, 60);
 }
