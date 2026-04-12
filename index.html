@@ -1,0 +1,631 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>Local Bands Tonight — Live music, right now</title>
+<meta name="description" content="Find local bands playing tonight in Pittsburgh and around the world. Live-scraped from venue sites — small bars, clubs, and restaurants." />
+<meta name="theme-color" content="#0b0d12" />
+<link rel="manifest" href="./manifest.json" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ctext y='.9em' font-size='56'%3E🎸%3C/text%3E%3C/svg%3E" />
+<style>
+  :root{
+    --bg:#0b0d12; --bg-2:#121420; --card:#171a27; --card-2:#1e2234;
+    --ink:#f3f4f8; --ink-dim:#a7adc4; --muted:#6b7290;
+    --line:rgba(255,255,255,.08);
+    --accent:#ff4d6d;        /* stage red */
+    --accent-2:#ffc24b;      /* stage amber */
+    --accent-3:#7b5cff;      /* stage violet */
+    --good:#34d399; --warn:#fbbf24; --bad:#f87171;
+    --radius:14px;
+  }
+  [data-theme="light"]{
+    --bg:#faf9f7; --bg-2:#ffffff; --card:#ffffff; --card-2:#f4f3ef;
+    --ink:#121420; --ink-dim:#44485a; --muted:#6b7290;
+    --line:rgba(0,0,0,.08);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font-family:ui-sans-serif,-apple-system,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+  a{color:inherit}
+  button{font:inherit;color:inherit;cursor:pointer}
+  .wrap{max-width:980px;margin:0 auto;padding:0 18px 120px}
+
+  /* ===== Header ===== */
+  header.top{position:sticky;top:0;z-index:20;backdrop-filter:blur(14px);background:color-mix(in oklab,var(--bg) 80%,transparent);border-bottom:1px solid var(--line)}
+  .top-inner{max-width:980px;margin:0 auto;padding:12px 18px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:800;letter-spacing:.2px;font-size:17px}
+  .brand-dot{width:12px;height:12px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px rgba(255,77,109,.2);animation:pulse 2s infinite}
+  @keyframes pulse{0%,100%{box-shadow:0 0 0 4px rgba(255,77,109,.2)}50%{box-shadow:0 0 0 8px rgba(255,77,109,.05)}}
+  .brand small{color:var(--ink-dim);font-weight:500;margin-left:6px}
+  .spacer{flex:1}
+  .pill{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;background:var(--card);border:1px solid var(--line);font-size:13px;color:var(--ink-dim)}
+  .pill.loc{cursor:pointer}
+  .pill.loc:hover{color:var(--ink)}
+  .iconbtn{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 10px;color:var(--ink);display:inline-flex;align-items:center;gap:6px;font-size:13px}
+  .iconbtn:hover{background:var(--card-2)}
+
+  /* ===== Draft banner ===== */
+  .banner{margin:14px 0;padding:12px 14px;border-radius:var(--radius);background:linear-gradient(135deg,#12213d,#2b1a4a);color:#e3eaff;border:1px solid rgba(123,92,255,.35);font-size:14px;display:none}
+  .banner b{color:#fff}
+  .banner.show{display:block}
+
+  /* ===== Splash ===== */
+  .splash{position:fixed;inset:0;z-index:50;background:radial-gradient(1200px 600px at 50% -10%,rgba(255,77,109,.18),transparent 60%),radial-gradient(900px 500px at 100% 100%,rgba(123,92,255,.18),transparent 55%),var(--bg);display:flex;align-items:center;justify-content:center;padding:24px}
+  .splash-card{max-width:520px;width:100%;text-align:center}
+  .loc-ring{width:120px;height:120px;border-radius:50%;margin:0 auto 22px;position:relative;background:radial-gradient(closest-side,rgba(255,77,109,.25),transparent 70%)}
+  .loc-ring::before,.loc-ring::after{content:"";position:absolute;inset:0;border-radius:50%;border:2px solid rgba(255,77,109,.6);animation:ring 2.6s ease-out infinite}
+  .loc-ring::after{animation-delay:1.3s}
+  @keyframes ring{0%{transform:scale(.4);opacity:1}100%{transform:scale(1.3);opacity:0}}
+  .loc-dot{position:absolute;inset:0;margin:auto;width:36px;height:36px;border-radius:50%;background:var(--accent);box-shadow:0 0 40px rgba(255,77,109,.8)}
+  .splash h1{font-size:32px;margin:0 0 8px;line-height:1.1}
+  .splash p{color:var(--ink-dim);margin:0 0 22px}
+  .btn{display:inline-flex;align-items:center;gap:8px;padding:13px 18px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--ink);font-weight:600;text-decoration:none;transition:transform .06s ease}
+  .btn:hover{background:var(--card-2)}
+  .btn:active{transform:translateY(1px)}
+  .btn.primary{background:linear-gradient(135deg,var(--accent),#ff7a5b);border-color:transparent;color:#fff}
+  .btn.primary:hover{filter:brightness(1.07)}
+  .btn.ghost{background:transparent}
+  .splash .row{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:6px}
+  .splash .city-row{margin-top:22px}
+  .splash input{background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:12px;padding:12px 14px;font-size:15px;min-width:240px}
+  .splash .hint{margin-top:18px;color:var(--muted);font-size:12px}
+
+  /* ===== Status bar ===== */
+  .status{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 6px}
+  .spill{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;font-size:12px;border:1px solid var(--line);background:var(--card);color:var(--ink-dim)}
+  .spill .s{width:8px;height:8px;border-radius:50%}
+  .s.ok{background:var(--good)} .s.warn{background:var(--warn)} .s.bad{background:var(--bad)} .s.idle{background:#64748b}
+  .count{font-size:13px;color:var(--ink-dim);margin-left:6px}
+
+  /* ===== Tabs ===== */
+  .tabs{display:flex;gap:6px;margin:18px 0 10px;overflow-x:auto;padding-bottom:4px}
+  .tab{padding:9px 14px;border-radius:999px;background:var(--card);border:1px solid var(--line);color:var(--ink-dim);font-size:13px;white-space:nowrap}
+  .tab.on{color:var(--ink);background:var(--card-2);border-color:rgba(255,77,109,.5);box-shadow:inset 0 0 0 1px rgba(255,77,109,.2)}
+
+  /* ===== Genre chips ===== */
+  .chips{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 16px}
+  .chip{padding:6px 10px;border-radius:999px;background:transparent;border:1px solid var(--line);color:var(--ink-dim);font-size:12px}
+  .chip.on{color:var(--ink);border-color:var(--accent-2);background:rgba(255,194,75,.08)}
+
+  /* ===== Counter ===== */
+  .counter{display:flex;align-items:baseline;gap:10px;margin:10px 0 14px;flex-wrap:wrap}
+  .counter .n{font-size:44px;font-weight:800;letter-spacing:-1px}
+  .counter .l{color:var(--ink-dim);font-size:14px}
+
+  /* ===== Cards ===== */
+  .grid{display:grid;gap:12px;grid-template-columns:1fr}
+  @media(min-width:720px){.grid{grid-template-columns:1fr 1fr}}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:14px;display:flex;flex-direction:column;gap:8px;position:relative;overflow:hidden}
+  .card .title{font-size:17px;font-weight:700;line-height:1.25}
+  .card .meta{color:var(--ink-dim);font-size:13px}
+  .card .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .badge{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:.3px;text-transform:uppercase}
+  .badge.live{background:rgba(255,77,109,.15);color:#ffb2c0;border:1px solid rgba(255,77,109,.45);animation:liveGlow 1.6s ease-in-out infinite}
+  @keyframes liveGlow{0%,100%{box-shadow:0 0 0 0 rgba(255,77,109,.5)}50%{box-shadow:0 0 0 8px rgba(255,77,109,0)}}
+  .badge.scraped{background:rgba(52,211,153,.12);color:#8bf3c9;border:1px solid rgba(52,211,153,.35)}
+  .badge.social{background:rgba(123,92,255,.12);color:#c9baff;border:1px solid rgba(123,92,255,.4)}
+  .badge.linked{background:rgba(107,114,144,.18);color:var(--ink-dim);border:1px solid var(--line)}
+  .badge.amber{background:rgba(255,194,75,.12);color:#ffd680;border:1px solid rgba(255,194,75,.35)}
+  .card .links{margin-top:6px;display:flex;gap:8px;flex-wrap:wrap}
+  .card .links a{font-size:12px;color:var(--ink-dim);text-decoration:none;padding:4px 8px;border:1px solid var(--line);border-radius:8px}
+  .card .links a:hover{color:var(--ink);background:var(--card-2)}
+  .empty{color:var(--ink-dim);font-size:14px;padding:16px;border:1px dashed var(--line);border-radius:var(--radius);text-align:center}
+
+  /* ===== Discovery cards (global) ===== */
+  .disc{display:grid;gap:10px;grid-template-columns:1fr 1fr}
+  @media(min-width:720px){.disc{grid-template-columns:repeat(4,1fr)}}
+  .disc a{display:flex;flex-direction:column;gap:4px;padding:14px;border-radius:var(--radius);background:var(--card);border:1px solid var(--line);text-decoration:none;color:var(--ink)}
+  .disc a:hover{background:var(--card-2)}
+  .disc .k{font-size:11px;color:var(--ink-dim);text-transform:uppercase;letter-spacing:.6px}
+  .disc .t{font-weight:700}
+
+  /* Section headers */
+  h2.sec{font-size:15px;font-weight:700;color:var(--ink);margin:26px 0 10px;display:flex;align-items:center;gap:8px}
+  h2.sec .rule{height:1px;flex:1;background:var(--line)}
+
+  /* Pro tips */
+  .tips{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px;color:var(--ink-dim);font-size:14px;line-height:1.55}
+  .tips b{color:var(--ink)}
+
+  footer{color:var(--muted);font-size:12px;text-align:center;margin-top:40px}
+  .hidden{display:none !important}
+</style>
+</head>
+<body data-theme="dark">
+
+<!-- ========== SPLASH ========== -->
+<div id="splash" class="splash">
+  <div class="splash-card">
+    <div class="loc-ring"><div class="loc-dot"></div></div>
+    <h1>Where are you tonight?</h1>
+    <p>We'll find small bands playing at bars &amp; restaurants near you.</p>
+    <div class="row">
+      <button class="btn primary" id="detectBtn">📍 Detect my location</button>
+      <button class="btn" id="pghBtn">🏙️ I'm in Pittsburgh, PA</button>
+    </div>
+    <div class="city-row row">
+      <input id="cityInput" placeholder="Or type any city…" autocomplete="off" />
+      <button class="btn" id="cityGo">Go</button>
+    </div>
+    <div class="hint">Uses OpenStreetMap reverse geocoding. No account needed.</div>
+  </div>
+</div>
+
+<!-- ========== HEADER ========== -->
+<header class="top">
+  <div class="top-inner">
+    <div class="brand"><span class="brand-dot"></span>Local Bands Tonight <small>by gyeningcorp</small></div>
+    <div class="spacer"></div>
+    <button class="pill loc" id="locPill" title="Change city">📍 <span id="locLabel">—</span></button>
+    <button class="iconbtn" id="refreshBtn" title="Refresh">⟳</button>
+    <button class="iconbtn" id="themeBtn" title="Toggle theme">🌓</button>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <!-- Draft banner -->
+  <div id="draftBanner" class="banner">
+    🏈 <b>NFL Draft week — April 23–25.</b> Pittsburgh's packed, so expect extra pop-up gigs at every bar in town.
+  </div>
+
+  <!-- ========== PITTSBURGH MODE ========== -->
+  <section id="pghMode" class="hidden">
+
+    <div class="status" id="statusBar"></div>
+
+    <div class="tabs" id="tabs">
+      <button class="tab on" data-tab="tonight">⚡ Tonight</button>
+      <button class="tab" data-tab="week">📅 This Week</button>
+      <button class="tab" data-tab="all">All Upcoming</button>
+      <button class="tab" data-tab="venues">🎤 Venues</button>
+    </div>
+
+    <div class="chips" id="chips">
+      <button class="chip on" data-g="all">All genres</button>
+      <button class="chip" data-g="rock">Rock</button>
+      <button class="chip" data-g="indie">Indie</button>
+      <button class="chip" data-g="jazz">Jazz</button>
+      <button class="chip" data-g="blues">Blues</button>
+      <button class="chip" data-g="country">Country</button>
+      <button class="chip" data-g="hiphop">Hip-Hop</button>
+      <button class="chip" data-g="electronic">Electronic</button>
+      <button class="chip" data-g="cover">Cover / Tribute</button>
+    </div>
+
+    <div id="counter" class="counter"></div>
+    <div id="eventsGrid" class="grid"></div>
+
+    <section id="venuesSection" class="hidden">
+      <h2 class="sec">Pittsburgh venue directory <span class="rule"></span></h2>
+      <div class="grid" id="venuesGrid"></div>
+    </section>
+
+    <h2 class="sec">Pro tips — how locals actually find bar gigs <span class="rule"></span></h2>
+    <div class="tips">
+      • <b>Follow venues on Instagram Thursday.</b> Most bars post their weekend lineup between Thursday afternoon and Friday morning.<br>
+      • <b>Check the <a href="https://www.facebook.com/PGHLiveMusic/" target="_blank" rel="noopener">PGH Live Music Facebook page</a></b> — it's the single best aggregator for Pittsburgh bar gigs.<br>
+      • <b>Call the bar at 3pm.</b> Seriously. If there's a band tonight, whoever's setting up will know.
+    </div>
+  </section>
+
+  <!-- ========== GLOBAL DISCOVERY MODE ========== -->
+  <section id="globalMode" class="hidden">
+    <h2 class="sec">Find live music tonight in <span id="cityName">your city</span> <span class="rule"></span></h2>
+    <div class="disc" id="discGrid"></div>
+    <h2 class="sec">Pro tips <span class="rule"></span></h2>
+    <div class="tips">
+      • Facebook Events is almost always the best real-time source for small-venue shows.<br>
+      • Search Instagram for <code>#livemusic[yourcity]</code> — bars post their lineup in Stories.<br>
+      • Google Maps "live music tonight near me" surfaces bars with active events.
+    </div>
+  </section>
+
+  <footer>
+    Local Bands Tonight · <a href="./privacy-policy.html">Privacy</a> · Data is scraped from public venue pages for personal, non-commercial discovery. Venues own their listings.
+  </footer>
+</div>
+
+<script>
+/* ===============================================================
+   Local Bands Tonight — static frontend
+   - Geolocation + reverse geocode (Nominatim, no key)
+   - Pittsburgh "scraper mode" via public CORS proxy (best-effort)
+   - Graceful fallback to venue directory + discovery links
+   =============================================================== */
+
+const PGH_RADIUS_KM = 40;          // Pittsburgh bounding radius
+const PGH_CENTER    = {lat:40.4406, lon:-79.9959};
+const CORS_PROXIES  = [
+  u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+  u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
+  u => `https://thingproxy.freeboard.io/fetch/${u}`,
+];
+
+/* -------- Venues (Tier 1 scraped, Tier 2 social, Tier 3 linked) -------- */
+const VENUES = [
+  // SCRAPED (Tier 1)
+  { id:"thunderbird", name:"Thunderbird Music Hall", area:"Lawrenceville",
+    source:"scraped", site:"https://thunderbirdmusichall.com",
+    facebook:"https://www.facebook.com/ThunderbirdMusicHall",
+    bandsintown:"https://www.bandsintown.com/v/10031596-thunderbird-cafe" },
+  { id:"clubcafe", name:"Club Café", area:"South Side",
+    source:"scraped", site:"https://www.clubcafelive.com/upcoming-shows",
+    bandsintown:"https://www.bandsintown.com/v/10000064-club-cafe" },
+  { id:"crafthouse", name:"Crafthouse Stage & Grill", area:"Baldwin",
+    source:"scraped", site:"https://crafthousepgh.com" },
+  { id:"roboto", name:"Mr. Roboto Project", area:"Bloomfield",
+    source:"scraped", site:"https://www.therobotoproject.com/calendar.html" },
+  { id:"mrsmalls", name:"Mr. Smalls Theatre", area:"Millvale",
+    source:"scraped", site:"https://mrsmalls.com" },
+  { id:"bottlerocket", name:"Bottlerocket Social Hall", area:"North Side",
+    source:"scraped", site:"https://www.bottlerocketpgh.com" },
+  { id:"stageae", name:"Stage AE", area:"North Shore",
+    source:"scraped", site:"https://promowestlive.com/pittsburgh/stage-ae" },
+
+  // SOCIAL WATCH (Tier 2)
+  { id:"ellys", name:"Elly's", area:"Carnegie",
+    source:"social", site:"https://ellyscarnegie.com",
+    instagram:"https://www.instagram.com/ellyscarnegie/", address:"1201 Washington Ave, Carnegie, PA 15106" },
+  { id:"howlers", name:"Howlers", area:"Bloomfield",
+    source:"social", site:"https://www.facebook.com/p/Howlers-100063635826774/",
+    facebook:"https://www.facebook.com/p/Howlers-100063635826774/" },
+  { id:"baja", name:"Baja Bar & Grill", area:"West View",
+    source:"social", site:"https://www.bajabargrill.com" },
+  { id:"hofbrau", name:"Hofbräuhaus Pittsburgh", area:"South Side Works",
+    source:"social", site:"https://www.hofbrauhauspittsburgh.com" },
+  { id:"cattivo", name:"Cattivo", area:"Lawrenceville",
+    source:"social", site:"https://www.facebook.com/cattivopgh" },
+
+  // LINKED ONLY (Tier 3)
+  { id:"citywinery", name:"City Winery Pittsburgh", area:"Strip District",
+    source:"linked", site:"https://citywinery.com/pages/locations/pittsburgh" },
+  { id:"ppg", name:"PPG Paints Arena", area:"Uptown",
+    source:"linked", site:"https://www.ppgpaintsarena.com" },
+  { id:"roxian", name:"Roxian Theatre", area:"McKees Rocks",
+    source:"linked", site:"https://roxiantheatre.com" },
+  { id:"haven", name:"Haven", area:"Downtown",
+    source:"linked", site:"https://www.havenvenue.com" },
+  { id:"enclave", name:"Enclave", area:"Downtown",
+    source:"linked", site:"https://www.enclavepgh.com" },
+  { id:"howlatmoon", name:"Howl at the Moon", area:"Downtown",
+    source:"linked", site:"https://www.howlatthemoon.com/pittsburgh-fundraising-events/" },
+];
+
+/* ---------------- state ---------------- */
+const state = {
+  loc: null,                // {city, country, countryCode, lat, lon}
+  mode: null,               // "pgh" | "global"
+  events: [],               // parsed events
+  tab: "tonight",
+  genre: "all",
+  scrapeStatus: {},         // venueId -> {status:"ok"|"bad"|"loading", count:n}
+};
+
+/* ---------------- DOM ---------------- */
+const $ = id => document.getElementById(id);
+const splash     = $("splash");
+const pghMode    = $("pghMode");
+const globalMode = $("globalMode");
+
+/* ---------------- boot ---------------- */
+(function boot(){
+  const saved = localStorage.getItem("lbt.loc");
+  if (saved){
+    try { applyLocation(JSON.parse(saved)); } catch {}
+  }
+  const theme = localStorage.getItem("lbt.theme") || "dark";
+  document.body.dataset.theme = theme;
+
+  // NFL Draft banner: 2026-04-23 → 2026-04-25
+  const now = new Date();
+  const draftStart = new Date("2026-04-20T00:00:00");
+  const draftEnd   = new Date("2026-04-26T00:00:00");
+  if (now >= draftStart && now < draftEnd) $("draftBanner").classList.add("show");
+
+  // wire UI
+  $("detectBtn").onclick = detectLocation;
+  $("pghBtn").onclick    = () => applyLocation({city:"Pittsburgh", country:"United States", countryCode:"US", lat:PGH_CENTER.lat, lon:PGH_CENTER.lon});
+  $("cityGo").onclick    = () => { const v = $("cityInput").value.trim(); if(v) lookupCity(v); };
+  $("cityInput").addEventListener("keydown", e => { if (e.key==="Enter") $("cityGo").click(); });
+  $("locPill").onclick   = showSplash;
+  $("themeBtn").onclick  = toggleTheme;
+  $("refreshBtn").onclick = () => { if (state.mode==="pgh") scrapeAll(); };
+
+  document.querySelectorAll(".tab").forEach(t => t.onclick = () => { setTab(t.dataset.tab); });
+  document.querySelectorAll(".chip").forEach(c => c.onclick = () => { setGenre(c.dataset.g); });
+})();
+
+/* ---------------- location ---------------- */
+function showSplash(){ splash.classList.remove("hidden"); splash.style.display="flex"; }
+function hideSplash(){ splash.style.display="none"; }
+
+function detectLocation(){
+  if (!navigator.geolocation){ alert("Geolocation not supported in this browser."); return; }
+  const btn = $("detectBtn"); btn.textContent = "📍 Detecting…"; btn.disabled = true;
+  navigator.geolocation.getCurrentPosition(async pos => {
+    const {latitude:lat, longitude:lon} = pos.coords;
+    try {
+      const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&zoom=10`,{headers:{Accept:"application/json"}});
+      const j = await r.json();
+      const a = j.address || {};
+      const city = a.city || a.town || a.village || a.hamlet || a.suburb || a.county || "your area";
+      const country = a.country || "";
+      const cc = (a.country_code||"").toUpperCase();
+      applyLocation({city, country, countryCode:cc, lat, lon});
+    } catch(e){
+      applyLocation({city:"your area", country:"", countryCode:"", lat, lon});
+    } finally { btn.textContent="📍 Detect my location"; btn.disabled=false; }
+  }, err => {
+    btn.textContent="📍 Detect my location"; btn.disabled=false;
+    alert("Couldn't get GPS. Try typing your city instead.\n\n"+err.message);
+  }, {enableHighAccuracy:false, timeout:10000, maximumAge:60000});
+}
+
+async function lookupCity(q){
+  try {
+    const r = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(q)}&limit=1`);
+    const j = await r.json();
+    if (!j.length){ alert("Couldn't find that city."); return; }
+    const h = j[0];
+    const parts = (h.display_name||"").split(",").map(s=>s.trim());
+    const city = parts[0] || q;
+    const country = parts[parts.length-1] || "";
+    applyLocation({city, country, countryCode:"", lat:+h.lat, lon:+h.lon});
+  } catch(e){ alert("Lookup failed: "+e.message); }
+}
+
+function distanceKm(a,b){
+  const R=6371, toRad=x=>x*Math.PI/180;
+  const dLat=toRad(b.lat-a.lat), dLon=toRad(b.lon-a.lon);
+  const s=Math.sin(dLat/2)**2 + Math.cos(toRad(a.lat))*Math.cos(toRad(b.lat))*Math.sin(dLon/2)**2;
+  return 2*R*Math.asin(Math.sqrt(s));
+}
+
+function applyLocation(loc){
+  state.loc = loc;
+  localStorage.setItem("lbt.loc", JSON.stringify(loc));
+  $("locLabel").textContent = `${flag(loc.countryCode)} ${loc.city}`.trim();
+  hideSplash();
+
+  const inPgh = loc.lat && loc.lon ? distanceKm(PGH_CENTER, loc) < PGH_RADIUS_KM : /pittsburgh/i.test(loc.city||"");
+  if (inPgh){ state.mode = "pgh"; pghMode.classList.remove("hidden"); globalMode.classList.add("hidden"); initPgh(); }
+  else { state.mode = "global"; globalMode.classList.remove("hidden"); pghMode.classList.add("hidden"); initGlobal(); }
+}
+
+function flag(cc){ if(!cc || cc.length!==2) return ""; return String.fromCodePoint(...[...cc.toUpperCase()].map(c=>0x1F1E6+c.charCodeAt(0)-65)); }
+
+/* ---------------- Pittsburgh mode ---------------- */
+function initPgh(){
+  renderStatusBar();
+  renderVenues();
+  scrapeAll();
+}
+
+function setTab(t){
+  state.tab = t;
+  document.querySelectorAll(".tab").forEach(x => x.classList.toggle("on", x.dataset.tab===t));
+  $("venuesSection").classList.toggle("hidden", t!=="venues");
+  $("eventsGrid").classList.toggle("hidden", t==="venues");
+  $("counter").classList.toggle("hidden", t==="venues");
+  $("chips").classList.toggle("hidden", t==="venues");
+  render();
+}
+function setGenre(g){
+  state.genre = g;
+  document.querySelectorAll(".chip").forEach(x => x.classList.toggle("on", x.dataset.g===g));
+  render();
+}
+
+function renderStatusBar(){
+  const bar = $("statusBar"); bar.innerHTML = "";
+  VENUES.filter(v=>v.source==="scraped").forEach(v => {
+    const st = state.scrapeStatus[v.id] || {status:"idle", count:0};
+    const el = document.createElement("span");
+    el.className = "spill";
+    const cls = st.status==="ok" ? "ok" : st.status==="loading" ? "warn" : st.status==="bad" ? "bad" : "idle";
+    el.innerHTML = `<span class="s ${cls}"></span>${v.name}<span class="count">${st.status==="ok"?`(${st.count})`:st.status==="loading"?"…":st.status==="bad"?"✕":""}</span>`;
+    el.title = st.status==="bad" ? "Scrape failed — try Refresh. The venue site may block proxies." : st.status==="loading" ? "Scraping…" : st.status==="ok" ? `${st.count} shows found` : "Not scraped yet";
+    bar.appendChild(el);
+  });
+}
+
+async function scrapeAll(){
+  state.events = [];
+  VENUES.filter(v=>v.source==="scraped").forEach(v => state.scrapeStatus[v.id] = {status:"loading", count:0});
+  renderStatusBar();
+  const tasks = VENUES.filter(v=>v.source==="scraped").map(scrapeVenue);
+  await Promise.allSettled(tasks);
+  renderStatusBar();
+  render();
+}
+
+async function fetchHtml(url){
+  let last;
+  for (const p of CORS_PROXIES){
+    try {
+      const r = await fetch(p(url), {cache:"no-store"});
+      if (r.ok) return await r.text();
+      last = new Error("HTTP "+r.status);
+    } catch(e){ last = e; }
+  }
+  throw last || new Error("all proxies failed");
+}
+
+async function scrapeVenue(v){
+  try {
+    const html = await fetchHtml(v.site);
+    const events = parseEvents(html, v);
+    state.scrapeStatus[v.id] = {status: events.length ? "ok" : "bad", count: events.length};
+    state.events.push(...events);
+  } catch(e){
+    state.scrapeStatus[v.id] = {status:"bad", count:0};
+  } finally { renderStatusBar(); render(); }
+}
+
+/* Generic best-effort event extractor.
+   Looks for date-like patterns near artist-name-like text. Returns [{title, venue, date, time, url}]. */
+function parseEvents(html, venue){
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const text = doc.body ? doc.body.innerText : "";
+  const out = [];
+  const seen = new Set();
+  const monthRe = "(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t|tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)";
+  const lineRe = new RegExp(`^(.{3,120}?)\\s*[·•\\-|–]\\s*${monthRe}\\s+\\d{1,2}(?:,\\s*\\d{4})?`, "i");
+  const dateRe  = new RegExp(`${monthRe}\\s+(\\d{1,2})(?:,\\s*(\\d{4}))?`, "i");
+
+  text.split("\n").map(s=>s.trim()).filter(Boolean).forEach(line => {
+    if (line.length > 160) return;
+    const m = line.match(lineRe);
+    if (!m) return;
+    const dm = line.match(dateRe);
+    if (!dm) return;
+    const monthIdx = ["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"]
+      .indexOf(dm[1].toLowerCase().slice(0,3));
+    if (monthIdx<0) return;
+    const day = +dm[2];
+    const year = dm[3] ? +dm[3] : new Date().getFullYear();
+    const d = new Date(year, monthIdx, day);
+    if (isNaN(d)) return;
+    const title = m[1].trim().replace(/\s{2,}/g," ").replace(/^[-–—•·]+\s*/, "");
+    if (!title || /^(events?|upcoming|tickets?|menu|home)$/i.test(title)) return;
+    const key = `${venue.id}|${title}|${d.toISOString().slice(0,10)}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ venueId:venue.id, venueName:venue.name, area:venue.area, title, date:d, url:venue.site });
+  });
+  return out.slice(0, 60);
+}
+
+/* ---------------- Render ---------------- */
+function startOfDay(d){ const x=new Date(d); x.setHours(0,0,0,0); return x; }
+function sameDay(a,b){ return startOfDay(a).getTime()===startOfDay(b).getTime(); }
+function withinWeek(d){ const t=startOfDay(new Date()); const w=new Date(t); w.setDate(w.getDate()+7); return d>=t && d<w; }
+
+function render(){
+  if (state.tab === "venues"){ renderVenues(); return; }
+  const now = new Date();
+  let list = state.events.slice();
+  if (state.tab==="tonight") list = list.filter(e => sameDay(e.date, now));
+  else if (state.tab==="week") list = list.filter(e => withinWeek(e.date));
+  else list = list.filter(e => e.date >= startOfDay(now));
+  if (state.genre !== "all") list = list.filter(e => matchGenre(e.title, state.genre));
+  list.sort((a,b)=>a.date-b.date);
+
+  // Counter
+  const dayLabel = now.toLocaleDateString(undefined,{weekday:"long", month:"long", day:"numeric"});
+  if (state.tab==="tonight")
+    $("counter").innerHTML = `<div class="n">${list.length}</div><div class="l">show${list.length===1?"":"s"} tonight · ${dayLabel}</div>`;
+  else if (state.tab==="week")
+    $("counter").innerHTML = `<div class="n">${list.length}</div><div class="l">show${list.length===1?"":"s"} this week</div>`;
+  else
+    $("counter").innerHTML = `<div class="n">${list.length}</div><div class="l">upcoming show${list.length===1?"":"s"}</div>`;
+
+  // Events grid
+  const g = $("eventsGrid"); g.innerHTML = "";
+  if (!list.length){
+    const someScraped = Object.values(state.scrapeStatus).some(s=>s.status==="ok");
+    const msg = someScraped
+      ? `No shows matched. Try switching tabs or clearing the genre filter.`
+      : `We couldn't pull venue pages just now (CORS proxy blocked or rate-limited). Tap <b>⟳ Refresh</b>, or jump straight to the venues tab to hit each site directly.`;
+    g.innerHTML = `<div class="empty">${msg}</div>`;
+    return;
+  }
+  list.forEach(e => g.appendChild(eventCard(e)));
+}
+
+function matchGenre(title, g){
+  const t = title.toLowerCase();
+  const map = {
+    rock: /rock|metal|punk|grunge/,
+    indie: /indie|alt|alternative/,
+    jazz: /jazz|bebop|swing/,
+    blues: /blues/,
+    country: /country|bluegrass|americana|honky/,
+    hiphop: /hip.?hop|rap|mc\s/,
+    electronic: /dj|edm|house|techno|electronic/,
+    cover: /tribute|cover|vs\.|night of/,
+  };
+  return map[g] ? map[g].test(t) : true;
+}
+
+function eventCard(e){
+  const el = document.createElement("div"); el.className = "card";
+  const now = new Date();
+  const live = sameDay(e.date, now) && (now - e.date) < 3*60*60*1000 && (now - e.date) > -30*60*1000;
+  const dateStr = e.date.toLocaleDateString(undefined,{weekday:"short", month:"short", day:"numeric"});
+  el.innerHTML = `
+    <div class="row">
+      ${live?'<span class="badge live">● Live now</span>':''}
+      <span class="badge scraped">Scraped</span>
+    </div>
+    <div class="title">${escapeHtml(e.title)}</div>
+    <div class="meta">${escapeHtml(e.venueName)} · ${escapeHtml(e.area||"")}</div>
+    <div class="meta">${dateStr}</div>
+    <div class="links">
+      <a href="${e.url}" target="_blank" rel="noopener">Venue site ↗</a>
+      <a href="https://www.google.com/search?q=${encodeURIComponent(e.title+' '+e.venueName+' tickets')}" target="_blank" rel="noopener">Search tickets</a>
+    </div>`;
+  return el;
+}
+function escapeHtml(s){ return (s||"").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+/* ----- Venue directory card ----- */
+function renderVenues(){
+  const g = $("venuesGrid"); g.innerHTML = "";
+  VENUES.forEach(v => {
+    const el = document.createElement("div"); el.className = "card";
+    const badge = v.source==="scraped" ? '<span class="badge scraped">Scraped</span>'
+               : v.source==="social"  ? '<span class="badge social">Social watch</span>'
+               : '<span class="badge linked">Linked only</span>';
+    const links = [
+      v.site && `<a href="${v.site}" target="_blank" rel="noopener">Website ↗</a>`,
+      v.facebook && `<a href="${v.facebook}" target="_blank" rel="noopener">Facebook ↗</a>`,
+      v.instagram && `<a href="${v.instagram}" target="_blank" rel="noopener">Instagram ↗</a>`,
+      v.bandsintown && `<a href="${v.bandsintown}" target="_blank" rel="noopener">Bandsintown ↗</a>`,
+    ].filter(Boolean).join(" ");
+    el.innerHTML = `
+      <div class="row">${badge}</div>
+      <div class="title">${escapeHtml(v.name)}</div>
+      <div class="meta">${escapeHtml(v.area||"")}${v.address?` · ${escapeHtml(v.address)}`:""}</div>
+      <div class="links">${links}</div>`;
+    g.appendChild(el);
+  });
+}
+
+/* ---------------- Global discovery mode ---------------- */
+function initGlobal(){
+  $("cityName").textContent = state.loc.city + (state.loc.country? ", "+state.loc.country : "");
+  const c = encodeURIComponent(state.loc.city + (state.loc.country? " "+state.loc.country : ""));
+  const tonight = encodeURIComponent(`live music tonight ${state.loc.city}`);
+  const items = [
+    {k:"Priority", t:"Facebook Events", s:"Best real-time source for small venues", u:`https://www.facebook.com/events/search/?q=${tonight}`},
+    {k:"Hashtag",  t:"Instagram",       s:"Venues post lineups in Stories",        u:`https://www.instagram.com/explore/tags/livemusic${state.loc.city.toLowerCase().replace(/[^a-z0-9]/g,"")}/`},
+    {k:"Maps",     t:"Google Maps",     s:"Nearby bars with active events",        u:`https://www.google.com/maps/search/${tonight}/`},
+    {k:"Clubs",    t:"Bandsintown",     s:"Best for club-level touring acts",      u:`https://www.bandsintown.com/?came_from=257&utf8=%E2%9C%93&l=${c}`},
+    {k:"Local",    t:"Yelp",            s:"Bars with live music tonight",          u:`https://www.yelp.com/search?find_desc=Bars+With+Live+Music+Tonight&find_loc=${c}`},
+    {k:"Listings", t:"Songkick",        s:"Aggregated concert listings",           u:`https://www.songkick.com/search?query=${c}`},
+    {k:"Tickets",  t:"Eventbrite",      s:"Local events & shows",                  u:`https://www.eventbrite.com/d/${c}/music--events/?start_date=today`},
+    {k:"Curated",  t:"DICE",            s:"Curated gigs in major cities",          u:`https://dice.fm/browse/${c}`},
+  ];
+  const g = $("discGrid"); g.innerHTML = "";
+  items.forEach(i => {
+    const a = document.createElement("a");
+    a.href = i.u; a.target = "_blank"; a.rel = "noopener";
+    a.innerHTML = `<div class="k">${i.k}</div><div class="t">${i.t}</div><div class="meta" style="color:var(--ink-dim);font-size:12px">${i.s}</div>`;
+    g.appendChild(a);
+  });
+}
+
+/* ---------------- theme ---------------- */
+function toggleTheme(){
+  const cur = document.body.dataset.theme === "light" ? "dark" : "light";
+  document.body.dataset.theme = cur;
+  localStorage.setItem("lbt.theme", cur);
+}
+
+/* auto-refresh every 30 min in PGH mode */
+setInterval(() => { if (state.mode==="pgh") scrapeAll(); }, 30*60*1000);
+</script>
+</body>
+</html>

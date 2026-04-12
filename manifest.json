@@ -1,0 +1,12 @@
+{
+  "name": "Local Bands Tonight",
+  "short_name": "Local Bands",
+  "description": "Find small local bands playing at bars and restaurants, tonight.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#0b0d12",
+  "theme_color": "#0b0d12",
+  "icons": [
+    { "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%230b0d12'/%3E%3Ctext x='50%25' y='56%25' text-anchor='middle' font-size='320'%3E🎸%3C/text%3E%3C/svg%3E", "sizes": "512x512", "type": "image/svg+xml" }
+  ]
+}
