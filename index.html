@@ -495,44 +495,44 @@ async function initCityMode(){
   state.scrapeStatus = {};
   state.discoveredVenues = [];
 
-  $(\"venuesSection\").classList.add(\"hidden\");
-  $(\"eventsGrid\").innerHTML = `<div class=\"empty\">🔍 Searching for live music in <b>${escapeHtml(loc.city)}</b>…</div>`;
-  $(\"counter\").innerHTML = \"\";
-  $(\"statusBar\").innerHTML = `<span class=\"spill\"><span class=\"s warn\"></span>Checking Bandsintown…</span>`;
+  $("venuesSection").classList.add("hidden");
+  $("eventsGrid").innerHTML = `<div class="empty">🔍 Searching for live music in <b>${escapeHtml(loc.city)}</b>…</div>`;
+  $("counter").innerHTML = "";
+  $("statusBar").innerHTML = `<span class="spill"><span class="s warn"></span>Checking Bandsintown…</span>`;
 
   // --- Tier 1: Bandsintown REST API (free, no key required) ---
   let directEvents = [];
   try { directEvents = await fetchBandsintownEvents(loc); }
-  catch(e){ console.warn(\"BIT API failed:\", e); }
+  catch(e){ console.warn("BIT API failed:", e); }
 
   if (directEvents.length > 0){
     state.events = directEvents;
     const dv = venuesFromEvents(directEvents, loc.city);
     state.discoveredVenues = dv;
-    $(\"statusBar\").innerHTML = `<span class=\"spill\"><span class=\"s ok\"></span>Bandsintown · ${directEvents.length} show${directEvents.length===1?\"\":\"s\"} found</span>`;
-    $(\"venuesDirHeading\").innerHTML = `${escapeHtml(loc.city)} venue directory <span class=\"rule\"></span>`;
+    $("statusBar").innerHTML = `<span class="spill"><span class="s ok"></span>Bandsintown · ${directEvents.length} show${directEvents.length===1?"":"s"} found</span>`;
+    $("venuesDirHeading").innerHTML = `${escapeHtml(loc.city)} venue directory <span class="rule"></span>`;
     renderVenues(dv);
     render();
     return;
   }
 
   // --- Tier 2: Google Places → scrape venue sites ---
-  $(\"statusBar\").innerHTML = `<span class=\"spill\"><span class=\"s warn\"></span>Trying Google Places…</span>`;
+  $("statusBar").innerHTML = `<span class="spill"><span class="s warn"></span>Trying Google Places…</span>`;
   let venues = [];
   if (loc.lat && loc.lon){
     try { venues = await discoverViaPlaces(loc); }
-    catch(e){ console.warn(\"Places API failed:\", e); }
+    catch(e){ console.warn("Places API failed:", e); }
   }
 
   if (!venues.length){
-    state.mode = \"global\";
-    pghMode.classList.add(\"hidden\"); globalMode.classList.remove(\"hidden\");
+    state.mode = "global";
+    pghMode.classList.add("hidden"); globalMode.classList.remove("hidden");
     initGlobal();
     return;
   }
 
   state.discoveredVenues = venues;
-  $(\"venuesDirHeading\").innerHTML = `${escapeHtml(loc.city)} venue directory <span class=\"rule\"></span>`;
+  $("venuesDirHeading").innerHTML = `${escapeHtml(loc.city)} venue directory <span class="rule"></span>`;
   renderStatusBar(venues);
   renderVenues(venues);
   scrapeAll(venues);
