@@ -388,7 +388,10 @@ function detectLocation(){
   navigator.geolocation.getCurrentPosition(async pos => {
     const {latitude:lat, longitude:lon} = pos.coords;
     try {
-      const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&zoom=10`,{headers:{Accept:"application/json"}});
+      const ctrl = new AbortController();
+      const tm = setTimeout(() => ctrl.abort(), 6000);
+      const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&zoom=10`,{headers:{Accept:"application/json"}, signal: ctrl.signal});
+      clearTimeout(tm);
       const j = await r.json();
       const a = j.address || {};
       const city = a.city || a.town || a.village || a.hamlet || a.suburb || a.county || "your area";
@@ -415,7 +418,10 @@ function detectLocation(){
 async function lookupCity(q){
   const btn = $("cityGo"); btn.textContent = "…"; btn.disabled = true;
   try {
-    const r = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(q)}&limit=1`);
+    const ctrl = new AbortController();
+    const tm = setTimeout(() => ctrl.abort(), 6000);
+    const r = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(q)}&limit=1`, {signal: ctrl.signal});
+    clearTimeout(tm);
     const j = await r.json();
     if (!j.length){ showToast(`🔍 Couldn't find "${q}" — try a different spelling.`, 5000, true); return; }
     const h = j[0];
@@ -555,7 +561,7 @@ async function fetchBandsintownEvents(loc){
   const locStr = loc.city + (loc.countryCode ? "," + loc.countryCode : "");
   const url = `https://rest.bandsintown.com/events/search?location=${encodeURIComponent(locStr)}&date=upcoming&app_id=rolling-in&per_page=50`;
   let text;
-  try { text = await fetchHtml(url); } catch { return []; }
+  try { text = await fetchHtml(url, {timeoutMs: 8000, minLen: 1}); } catch { return []; }
   let json;
   try { json = JSON.parse(text); } catch { return []; }
   if (!Array.isArray(json)) return [];
@@ -663,21 +669,25 @@ async function scrapeAll(venueList){
   render();
 }
 
-async function fetchHtml(url){
-  let last;
-  for (const p of CORS_PROXIES){
-    try {
-      const r = await fetch(p(url), {cache:"no-store"});
-      if (r.ok){
-        const text = await r.text();
-        if (text && text.length > 500) return text;   // guard against empty-wrapper responses
-        last = new Error("empty response");
-      } else {
-        last = new Error("HTTP "+r.status);
-      }
-    } catch(e){ last = e; }
+async function fetchHtml(url, {timeoutMs = 7000, minLen = 500} = {}){
+  // Race all proxies in parallel so a single hung proxy can't freeze the UI.
+  // First one to return a non-empty 2xx response wins; others are aborted.
+  const ctrls = CORS_PROXIES.map(() => new AbortController());
+  const tm = setTimeout(() => ctrls.forEach(c => c.abort()), timeoutMs);
+  const attempts = CORS_PROXIES.map((p, i) => (async () => {
+    const r = await fetch(p(url), {cache:"no-store", signal: ctrls[i].signal});
+    if (!r.ok) throw new Error("HTTP "+r.status);
+    const text = await r.text();
+    if (!text || text.length <= minLen) throw new Error("empty response");
+    return text;
+  })());
+  try {
+    const text = await Promise.any(attempts);
+    ctrls.forEach(c => c.abort());   // cancel losers
+    return text;
+  } finally {
+    clearTimeout(tm);
   }
-  throw last || new Error("all proxies failed");
 }
 
 async function scrapeVenue(v){
