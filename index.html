@@ -241,15 +241,14 @@
    Rolling In — static frontend
    - Geolocation + reverse geocode (Nominatim, no key)
    - Pittsburgh "scraper mode" via public CORS proxy (best-effort)
-   - ANY city: Tier 1 = free Bandsintown scrape via CORS proxy
-               Tier 2 = Google Places Text Search API (fallback)
-   - Graceful fallback to venue directory + discovery links
+   - Non-PGH cities: hand off to the Global discovery grid (Google,
+     Facebook, Bandsintown, Yelp, Songkick, Eventbrite, DICE).
+     Reliable worldwide event scraping needs an API key we don't
+     currently carry; revisit after the NFL Draft window.
    =============================================================== */
 
 const PGH_RADIUS_KM = 40;          // Pittsburgh bounding radius
 const PGH_CENTER    = {lat:40.4406, lon:-79.9959};
-const GMAPS_KEY     = "AIzaSyCdtJPbHTyKuGGIQRsM1KKT3gt5prLpLZw";
-const MIN_FREE_VENUES = 3;         // fall to Places API if free scrape yields fewer
 // Ordered: codetabs confirmed working 2026-04-12 for all 7 venues. Others kept as fallbacks.
 const CORS_PROXIES  = [
   u => `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(u)}`,
@@ -354,7 +353,7 @@ const globalMode = $("globalMode");
   $("themeBtn").onclick  = toggleTheme;
   $("refreshBtn").onclick = () => {
     if (state.mode==="pgh") initPgh();
-    else if (state.mode==="city") scrapeAll(state.discoveredVenues);
+    else if (state.mode==="global") initGlobal();
   };
 
   document.querySelectorAll(".tab").forEach(t => t.onclick = () => { setTab(t.dataset.tab); });
@@ -453,9 +452,7 @@ function applyLocation(loc){
     pghMode.classList.remove("hidden"); globalMode.classList.add("hidden");
     initPgh();
   } else {
-    // Start city-scraper mode; fall back to discovery links if venue discovery fails
-    state.mode = "city";
-    pghMode.classList.remove("hidden"); globalMode.classList.add("hidden");
+    // Non-PGH: route straight to the discovery grid.
     initCityMode();
   }
 }
@@ -468,165 +465,18 @@ async function initPgh(){
   renderStatusBar(VENUES.filter(v=>v.source==="scraped"));
   renderVenues(VENUES);
   await scrapeAll(VENUES.filter(v=>v.source==="scraped"));
-
-  // If venue scrapers got nothing (CORS proxies blocked), fall back to Bandsintown API
-  if (state.events.length === 0){
-    try {
-      const bitEvents = await fetchBandsintownEvents({city:"Pittsburgh", countryCode:"US"});
-      if (bitEvents.length){
-        state.events = bitEvents;
-        $("statusBar").innerHTML = `<span class="spill"><span class="s ok"></span>Bandsintown · ${bitEvents.length} upcoming shows</span>`;
-        render();
-      }
-    } catch(e){ console.warn("PGH BIT fallback failed:", e); }
-  }
 }
 
 /* ----------------------------------------------------------------
-   City Scraper Mode — for any non-Pittsburgh city
-   Strategy:
-     Tier 1 (free) : Bandsintown REST API → structured JSON events worldwide
-     Tier 2 (API)  : Google Places Text Search → scrape venue sites
-     Fallback       : discovery links
+   Non-Pittsburgh cities: hand straight off to the Global discovery
+   grid. Real worldwide event scraping needs an API key we're not
+   carrying yet — revisit post-Draft.
 ---------------------------------------------------------------- */
-async function initCityMode(){
-  const loc = state.loc;
-  state.events = [];
-  state.scrapeStatus = {};
-  state.discoveredVenues = [];
-
-  $("venuesSection").classList.add("hidden");
-  $("eventsGrid").innerHTML = `<div class="empty">🔍 Searching for live music in <b>${escapeHtml(loc.city)}</b>…</div>`;
-  $("counter").innerHTML = "";
-  $("statusBar").innerHTML = `<span class="spill"><span class="s warn"></span>Checking Bandsintown…</span>`;
-
-  // --- Tier 1: Bandsintown REST API (free, no key required) ---
-  let directEvents = [];
-  try { directEvents = await fetchBandsintownEvents(loc); }
-  catch(e){ console.warn("BIT API failed:", e); }
-
-  if (directEvents.length > 0){
-    state.events = directEvents;
-    const dv = venuesFromEvents(directEvents, loc.city);
-    state.discoveredVenues = dv;
-    $("statusBar").innerHTML = `<span class="spill"><span class="s ok"></span>Bandsintown · ${directEvents.length} show${directEvents.length===1?"":"s"} found</span>`;
-    $("venuesDirHeading").innerHTML = `${escapeHtml(loc.city)} venue directory <span class="rule"></span>`;
-    renderVenues(dv);
-    render();
-    return;
-  }
-
-  // --- Tier 2: Google Places → scrape venue sites ---
-  $("statusBar").innerHTML = `<span class="spill"><span class="s warn"></span>Trying Google Places…</span>`;
-  let venues = [];
-  if (loc.lat && loc.lon){
-    try { venues = await discoverViaPlaces(loc); }
-    catch(e){ console.warn("Places API failed:", e); }
-  }
-
-  if (!venues.length){
-    state.mode = "global";
-    pghMode.classList.add("hidden"); globalMode.classList.remove("hidden");
-    initGlobal();
-    return;
-  }
-
-  state.discoveredVenues = venues;
-  $("venuesDirHeading").innerHTML = `${escapeHtml(loc.city)} venue directory <span class="rule"></span>`;
-  renderStatusBar(venues);
-  renderVenues(venues);
-  scrapeAll(venues);
-}
-
-function hostnameOf(url){
-  try { return new URL(url).hostname; } catch { return url; }
-}
-
-/* Build a deduplicated venue list from a flat events array (for Venues tab) */
-function venuesFromEvents(events, city){
-  const seen = new Set();
-  const out = [];
-  for (const e of events){
-    if (seen.has(e.venueId)) continue;
-    seen.add(e.venueId);
-    out.push({ id:e.venueId, name:e.venueName, area:e.area||city, source:"linked", site:e.url });
-  }
-  return out;
-}
-
-/* ---- Tier 1: Bandsintown legacy REST API (free, no auth needed) ----
-   Endpoint: rest.bandsintown.com/events/search
-   Returns JSON array of upcoming shows for any city worldwide.       */
-async function fetchBandsintownEvents(loc){
-  const locStr = loc.city + (loc.countryCode ? "," + loc.countryCode : "");
-  const url = `https://rest.bandsintown.com/events/search?location=${encodeURIComponent(locStr)}&date=upcoming&app_id=rolling-in&per_page=50`;
-  let text;
-  try { text = await fetchHtml(url, {timeoutMs: 8000, minLen: 1}); } catch { return []; }
-  let json;
-  try { json = JSON.parse(text); } catch { return []; }
-  if (!Array.isArray(json)) return [];
-
-  const out = [], seen = new Set();
-  for (const ev of json){
-    const title = Array.isArray(ev.lineup) && ev.lineup.length
-      ? ev.lineup.join(", ")
-      : (ev.description || "").slice(0,120);
-    if (!title) continue;
-    const venueName = ev.venue?.name || "";
-    const area      = ev.venue?.city || loc.city;
-    const venueId   = "bit_" + venueName.toLowerCase().replace(/[^a-z0-9]/g,"_").slice(0,30);
-    let date;
-    try { date = ev.datetime ? new Date(ev.datetime) : null; } catch { date = null; }
-    if (!date || isNaN(date)) continue;
-    const eventUrl = ev.url || "";
-    const key = `${venueId}|${title.toLowerCase()}|${date.toISOString().slice(0,10)}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push({ venueId, venueName, area, title, date, url:eventUrl });
-  }
-  return out;
-}
-
-/* ---- Tier 2: Google Places Text Search (costs API credits) ---- */
-async function discoverViaPlaces(loc){
-  const query = `live music bar venue in ${loc.city}`;
-  const body = {
-    textQuery: query,
-    locationBias: {
-      circle: {
-        center: { latitude: loc.lat, longitude: loc.lon },
-        radius: 30000   // 30 km
-      }
-    },
-    maxResultCount: 10,
-  };
-  const r = await fetch("https://places.googleapis.com/v1/places:searchText", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Goog-Api-Key": GMAPS_KEY,
-      "X-Goog-FieldMask": "places.displayName,places.websiteUri,places.formattedAddress,places.id"
-    },
-    body: JSON.stringify(body)
-  });
-  if (!r.ok) throw new Error("Places API HTTP " + r.status);
-  const j = await r.json();
-  const venues = [];
-  const seen = new Set();
-  for (const p of (j.places || [])){
-    const name = p.displayName?.text || "";
-    const site = p.websiteUri || "";
-    if (!name || !site) continue;
-    const key = hostnameOf(site);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const venueId = "gp_" + name.toLowerCase().replace(/[^a-z0-9]/g,"_").slice(0,30);
-    // Extract neighborhood from formatted address (second component)
-    const addrParts = (p.formattedAddress || "").split(",").map(s=>s.trim());
-    const area = addrParts[1] || loc.city;
-    venues.push({ id: venueId, name, area, source: "scraped", site });
-  }
-  return venues;
+function initCityMode(){
+  state.mode = "global";
+  pghMode.classList.add("hidden");
+  globalMode.classList.remove("hidden");
+  initGlobal();
 }
 
 function setTab(t){
@@ -1081,10 +931,9 @@ function toggleTheme(){
   localStorage.setItem("lbt.theme", cur);
 }
 
-/* auto-refresh every 30 min in PGH or city mode */
+/* auto-refresh Pittsburgh scrapers every 30 min */
 setInterval(() => {
   if (state.mode==="pgh") initPgh();
-  else if (state.mode==="city" && state.discoveredVenues.length) scrapeAll(state.discoveredVenues);
 }, 30*60*1000);
 </script>
 </body>
